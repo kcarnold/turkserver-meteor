@@ -89,7 +89,7 @@ testLogin = ->
     Session.set("_loginParams", loginParams)
     mturkLogin(loginParams)
 
-Meteor.startup ->
+TurkServer.loginToHIT = ->
   # Remember our previous hit parameters unless they have been replaced
   # TODO make sure this doesn't interfere with actual HITs
   if params.hitId and params.assignmentId and params.workerId
