@@ -36,11 +36,7 @@ Template.tsAdminCompletedExperiments.experiments = ->
   ,
     sort: { startTime: 1 }
 
-Template.tsAdminCompletedExperiments.duration = ->
-  diff = moment.utc(@endTime - @startTime)
-  time = diff.format(" H:mm:ss")
-  days = +diff.format("DDD") - 1
-  return (if days then days + "d" else "") + time
+Template.tsAdminCompletedExperiments.duration = -> Util.duration(@endTime - @startTime)
 
 Template.tsAdminCompletedExperiments.numUsers = numUsers
 
@@ -85,11 +81,18 @@ Template.tsAdminConfigureBatch.selectedBatch = ->
   Batches.findOne(Session.get("_tsSelectedBatchId"))
 
 Template.tsAdminBatchEditDesc.rendered = ->
-  settings =
+  container = @$('div.editable')
+  grabValue = -> $.trim container.text() # Always get reactively updated value
+  container.editable
+    value: grabValue
+    display: -> # Never set text; have Meteor update to preserve reactivity
     success: (response, newValue) =>
       Batches.update @data._id,
         $set: { desc: newValue }
-  $(@find('div.editable:not(.editable-click)')).editable('destroy').editable(settings)
+      # Thinks it knows the value, but it actually doesn't - grab a fresh value each time
+      Meteor.defer -> container.data('editableContainer').formOptions.value = grabValue
+      return # The value of this function matters
+  return
 
 Template.tsAdminBatchEditTreatments.events =
   "click .-ts-remove-batch-treatment": (e, tmpl) ->
