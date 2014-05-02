@@ -127,8 +127,6 @@ Meteor.methods
         exitdata: doc
       }
 
-    # TODO schedule this worker's resume token to be scavenged in the future
-
     # Update worker contact info
     # TODO generalize this
     if panel

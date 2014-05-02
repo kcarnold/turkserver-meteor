@@ -1,17 +1,3 @@
-###
-  Add a hook to Meteor's login system:
-  To account for for MTurk use, except for admin users
-  for users who are not currently assigned to a HIT.
-###
-Accounts.validateLoginAttempt (info) ->
-  if info.methodArguments[0].resume? and not info.user.admin
-    # Is the worker currently assigned to a HIT?
-    unless info.user.workerId and Assignments.findOne(
-      workerId: info.user.workerId
-      status: "assigned"
-    )
-      throw new Meteor.Error(403, "Your HIT session has expired.")
-  return true
 
 TurkServer.authenticateWorker = (loginRequest) ->
   # Has this worker already completed the HIT?
@@ -105,7 +91,10 @@ Accounts.registerLoginHandler (loginRequest) ->
     workerId: loginRequest.workerId
     userId: userId
 
-  # TODO: set the login token ourselves so that the expiration interval is shorter.
+  ###
+    TODO Use login handlers and address the issue of resume tokens
+    https://github.com/meteor/meteor/issues/1835
+  ###
 
   return {
     userId: userId,
