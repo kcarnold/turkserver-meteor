@@ -24,15 +24,43 @@ TurkServer.isAdmin = ->
     "admin" : 1
   )?.admin
 
-TurkServer.treatment = ->
-  Experiments.findOne({}, fields: {treatment: 1})?.treatment
-
 TurkServer.batch = ->
   experiment = Experiments.findOne({}, fields: {batchId: 1})
   Batches.findOne(experiment.batchId) if experiment?
 
-TurkServer.currentRound = ->
-  RoundTimers.findOne(active: true)
+TurkServer.treatment = -> Treatments.findOne()
+
+# Find current round, whether running or in break
+# TODO this polls every second, which can be quite inefficient
+currentRound = ->
+  if (activeRound = RoundTimers.findOne(active: true))?
+    # Is the active round started?
+    if activeRound.startTime <= TimeSync.serverTime()
+      return activeRound
+    else
+      # Return the round before this one, if any
+      return RoundTimers.findOne(index: activeRound.index - 1)
+  return
+
+TurkServer.currentRound = UI.emboxValue(currentRound, EJSON.equals)
+
+safeStartMonitor = (threshold, idleOnBlur) ->
+  Deps.autorun ->
+    # Don't try to start the monitor in case the state changed
+    @stop() unless TurkServer.inExperiment()
+    try
+      UserStatus.startMonitor {threshold, idleOnBlur}
+      @stop()
+
+idleComp = null
+
+TurkServer.enableIdleMonitor = (threshold, idleOnBlur) ->
+  throw new Error("Idle monitor already enabled") if idleComp?
+  idleComp = Deps.autorun ->
+    if TurkServer.inExperiment()
+      safeStartMonitor(threshold, idleOnBlur)
+    else
+      UserStatus.stopMonitor() if Deps.nonreactive -> UserStatus.isMonitoring()
 
 ###
   Reactive computations
@@ -55,4 +83,3 @@ Deps.autorun ->
 Deps.autorun ->
   Meteor.subscribe("tsCurrentExperiment", Partitioner.group())
 
-# TODO start idle monitor automatically with an experiment

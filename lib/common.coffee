@@ -2,6 +2,8 @@
 # This is exported so it doesn't need @
 TurkServer = TurkServer || {}
 
+TestUtils = TestUtils || {}
+
 # Backwards compat, and for cohesion while programming
 TurkServer.group = Partitioner.group
 TurkServer.partitionCollection = Partitioner.partitionCollection
@@ -9,6 +11,8 @@ TurkServer.partitionCollection = Partitioner.partitionCollection
 @Batches = new Meteor.Collection("ts.batches")
 @Treatments = new Meteor.Collection("ts.treatments")
 @Experiments = new Meteor.Collection("ts.experiments")
+
+@Logs = new Meteor.Collection("ts.logs")
 
 @RoundTimers = new Meteor.Collection("ts.rounds")
 TurkServer.partitionCollection RoundTimers, {index: {index: 1}}

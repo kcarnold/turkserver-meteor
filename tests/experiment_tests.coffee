@@ -46,8 +46,12 @@ if Meteor.isServer
         $unset: experimentId: null
       }
 
-    Treatments.insert(name: "fooTreatment")
-    TurkServer.Experiment.create({name: "fooTreatment"}, _id: "fooGroup")
+    # These properties are checked below
+    Treatments.insert
+      name: "fooTreatment"
+      fooProperty: "bar"
+
+    TurkServer.Experiment.create({}, {name: "fooTreatment"}, _id: "fooGroup")
     next()
 
   Tinytest.addAsync "experiment - init - context", (test, next) ->
@@ -55,7 +59,9 @@ if Meteor.isServer
     group = undefined
     TurkServer.Experiment.setup("fooGroup")
 
-    test.equal treatment, "fooTreatment"
+    test.isTrue treatment
+    test.equal treatment.name, "fooTreatment"
+    test.equal treatment.fooProperty, "bar"
     test.equal group, "fooGroup"
     next()
 
@@ -85,12 +91,13 @@ if Meteor.isServer
     TurkServer.Experiment.addUser "fooGroup", userId
 
 if Meteor.isClient
-  Tinytest.addAsync "experiment - client - received experiment id", (test, next) ->
+  Tinytest.addAsync "experiment - client - received experiment and treatment", (test, next) ->
     Deps.autorun (c) ->
       treatment = TurkServer.treatment()
-      console.info "Got treatment " + treatment
+      console.info "Got treatment ", treatment
       if treatment
         c.stop()
-        test.equal treatment, "fooTreatment"
         test.isTrue Experiments.findOne()
+        test.isTrue treatment
+        test.equal treatment.name, "fooTreatment"
         next()

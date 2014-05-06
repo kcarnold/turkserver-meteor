@@ -25,6 +25,7 @@ Treatments._ensureIndex {name: 1}, {unique: 1}
 
 # Only server should update these
 Experiments.deny(always)
+Logs.deny(always)
 RoundTimers.deny(always)
 
 ###
@@ -77,6 +78,7 @@ Meteor.publish "tsCurrentExperiment", (group) ->
   return unless @userId
   return [
     Experiments.find(group),
+    Treatments.find(name: Experiments.findOne(group)?.treatment) # Current treatment data
     RoundTimers.find() # Partitioned by group
   ]
 

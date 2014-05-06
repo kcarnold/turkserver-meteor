@@ -1,7 +1,24 @@
+<template name="tsAdminGroupInfo">
+    <dl class="dl-horizontal ts-compact">
+        <dt>Group:</dt>
+        <dd>{{_id}}</dd>
+        <dt>Treatment:</dt>
+        <dd><span class="badge badge-inverse">{{treatment}}</span></dd>
+        <dt>Users:</dt>
+        <dd>
+            {{#each users}}
+            {{> tsUserPill userId=this}}
+            {{/each}}
+        </dd>
+    </dl>
+</template>
+
 <template name="tsUserPill">
+    {{#with user}}
     <div class="ts-user-pill-container">
         <span class="label {{labelClass}}">{{identifier}}</span>
     </div>
+    {{/with}}
 </template>
 
 <template name="tsUserPillPopover">
@@ -28,7 +45,11 @@
     </dl>
 
     {{#if status.online}}
-    <b class="text-success">Connected</b>
+        {{#unless status.idle}}
+        <b class="text-success">Connected</b>
+        {{else}}
+        <b class="text-warning">Connected - Idle</b>
+        {{/unless}}
     {{else}}
     <b class="text-danger">Disconnected</b>
     {{/if}}

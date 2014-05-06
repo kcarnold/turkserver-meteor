@@ -24,28 +24,33 @@
             <th>Treatment</th>
             <th style="width: 50px">Size</th>
             <th>Users</th>
-            <th style="width: 140px"></th>
+            <th style="width: 190px"></th>
         </tr>
         </thead>
         {{#each experiments}}
+        <tbody>
         <tr>
             <td>{{_tsRenderTime startTime}}</td>
             <td>{{_tsRenderTimeSince startTime}}</td>
             <td><span class="badge badge-inverse">{{treatment}}</span></td>
             <td><b>{{numUsers}}</b></td>
-            <td>{{#each this.users}}
-                {{> tsUserPill _tsLookupUser}}
+            <td>{{#each users}}
+                {{> tsUserPill userId=this}}
                 {{/each}}
             </td>
             <td>
                 <button class="btn btn-xs btn-primary -ts-watch-experiment">
                     <span class="glyphicon glyphicon-camera"></span> Watch
                 </button>
+                <button class="btn btn-xs btn-success -ts-experiment-logs">
+                    <span class="glyphicon glyphicon-list-alt"></span> Logs
+                </button>
                 <button class="btn btn-xs btn-danger -ts-stop-experiment">
                     <span class="glyphicon glyphicon-ban-circle"></span> Stop
                 </button>
             </td>
         </tr>
+        </tbody>
         {{/each}}
     </table>
 
@@ -65,6 +70,7 @@
             <th style="width: 80px"></th>
         </tr>
         </thead>
+        <tbody>
         {{#each experiments}}
         <tr>
             <td>{{_tsRenderTime startTime}}</td>
@@ -72,7 +78,7 @@
             <td><span class="badge badge-inverse">{{treatment}}</span></td>
             <td><b>{{numUsers}}</b></td>
             <td>{{#each this.users}}
-                {{> tsUserPill _tsLookupUser}}
+                {{> tsUserPill userId=this}}
                 {{/each}}
             </td>
             <td>
@@ -82,18 +88,47 @@
             </td>
         </tr>
         {{/each}}
+        </tbody>
     </table>
 
+</template>
+
+<template name="tsAdminLogs">
+    <h3>Showing Logs For:</h3>
+
+    <div class="well">
+        {{> tsAdminGroupInfo}}
+    </div>
+
+    <table class="table table-condensed table-striped ts-admin-table">
+        <thead>
+        <tr>
+            <th style="width: 160px">Timestamp</th>
+            <th style="width: 120px">User</th>
+            <th>Data</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{#each logEntries}}
+        <tr>
+            <td>{{_tsRenderTime _timestamp}}</td>
+            <td>{{> tsUserPill userId=_userId}}</td>
+            <td>{{> tsDescList entryData}}</td>
+        </tr>
+        {{/each}}
+        </tbody>
+    </table>
 </template>
 
 <template name="tsAdminManage">
     <h3>Manage Treatments</h3>
     <div class="row">
         <div class="col-md-6">
+        {{> tsAdminNewTreatment}}
         {{> tsAdminTreatments }}
         </div>
         <div class="col-md-6">
-        {{> tsAdminNewTreatment}}
+        {{> tsAdminTreatmentConfig }}
         </div>
     </div>
 
@@ -119,6 +154,7 @@
             <th></th>
         </tr>
         </thead>
+        <tbody>
         {{#each treatments}}
         <tr>
             <td>{{> tsTreatmentPill}}</td>
@@ -132,6 +168,7 @@
             <td colspan="2"><i>No treatments configured yet.</i></td>
         </tr>
         {{/if}}
+        </tbody>
     </table>
 </template>
 
@@ -140,6 +177,16 @@
         <input class="form-control" type="text" name="name" placeholder="New treatment name...">
         <button class="btn btn-primary" type="submit">Add treatment</button>
     </form>
+</template>
+
+<template name="tsAdminTreatmentConfig">
+    <div class="well">
+    {{#with selectedTreatment}}
+    {{> tsDescList}}
+    {{else}}
+    <i>Select a treatment to the left to view properties.</i>
+    {{/with}}
+    </div>
 </template>
 
 <template name="tsAdminActiveBatches">
@@ -175,7 +222,7 @@
         {{/if}}
 
     {{else}}
-    <i>Select a batch below to view properties.</i>
+    <i>Select a batch to the left to view properties.</i>
     {{/with}}
     </div>
 </template>

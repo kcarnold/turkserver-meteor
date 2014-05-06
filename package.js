@@ -19,7 +19,7 @@ Package.on_use(function (api) {
     // Client-only deps
     api.use([
         'session',
-        'handlebars',
+        'ui',
         'templating',
         'd3'
     ], 'client');
@@ -30,6 +30,7 @@ Package.on_use(function (api) {
         'accounts-ui',
         'accounts-password', // for the admin user
         'deps',
+        'ejson',
         'stylus',
         'jquery',
         'underscore',
@@ -76,8 +77,10 @@ Package.on_use(function (api) {
     // Client
     api.add_files([
         'client/templates.html',
+        'client/login.html',
         'client/ts_client.styl',
         'client/ts_client.coffee',
+        'client/login.coffee',
         'client/logging_client.coffee',
         'client/timers_client.coffee',
         'client/helpers.coffee',
@@ -104,11 +107,10 @@ Package.on_use(function (api) {
     api.add_files('admin/admin.coffee', 'server');
 
     api.export(['TurkServer']);
+    api.export(['TestUtils'], { testOnly: true });
 });
 
 Package.on_test(function (api) {
-    api.use('turkserver');
-
     api.use([
       'accounts-base',
       'accounts-password',
@@ -126,6 +128,9 @@ Package.on_test(function (api) {
 
     api.use('session', 'client');
 
+    api.use('turkserver');
+
+    api.add_files("tests/display_fix.css");
     api.add_files("tests/insecure_login.js");
 
     api.add_files('tests/utils.coffee');
@@ -133,5 +138,6 @@ Package.on_test(function (api) {
     api.add_files('tests/lobby_tests.coffee');
     api.add_files('tests/auth_tests.coffee', 'server');
     api.add_files('tests/experiment_tests.coffee');
+    api.add_files('tests/timer_tests.coffee', 'server');
     api.add_files('tests/logging_tests.coffee');
 });

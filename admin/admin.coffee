@@ -1,16 +1,15 @@
 # Server admin code
+isAdmin = (userId) -> userId? and Meteor.users.findOne(userId)?.admin
 
 # Only admin gets server facts
-Facts.setUserIdFilter (userId) -> Meteor.users.findOne(userId)?.admin
+Facts.setUserIdFilter(isAdmin)
 
 Meteor.publish "tsAdmin", ->
-  return unless @userId and Meteor.users.findOne(@userId).admin
+  return [] unless isAdmin(@userId)
 
   # Publish all admin data
   return [
     Batches.find(),
-    Treatments.find(),
-    # Grouping.find(),
     Assignments.find(),
     Workers.find(),
     Qualifications.find(),
@@ -29,10 +28,13 @@ userFindOptions =
 # Admin users - needs to update if group updates
 # Return all experiments unless in a group
 Meteor.publish "tsAdminState", (groupId) ->
-  return unless @userId and Meteor.users.findOne(@userId).admin
+  return [] unless isAdmin(@userId)
 
   cursors = [ Meteor.users.find({}, userFindOptions) ]
-  cursors.push Experiments.find() unless groupId # taken care of in tsCurrentExperiment
+
+  unless groupId # specific experiment/treatment sent in tsCurrentExperiment
+    cursors.push Experiments.find()
+    cursors.push Treatments.find()
 
   return cursors
 
@@ -46,6 +48,7 @@ offlineFindOptions =
 # Helper publish function to get users for experiments that have ended.
 # Necessary to watch completed experiments.
 Meteor.publish "tsGroupUsers", (groupId) ->
+  return [] unless isAdmin(@userId)
   sub = this
   exp = Experiments.findOne(groupId)
   return unless exp
@@ -62,6 +65,14 @@ Meteor.publish "tsGroupUsers", (groupId) ->
 
   sub.ready()
   sub.onStop -> subHandle.stop()
+
+Meteor.publish "tsGroupLogs", (groupId, limit) ->
+  return [] unless isAdmin(@userId)
+
+  return Logs.find({_groupId: groupId}, {
+      sort: {_timestamp: -1},
+      limit: limit
+    })
 
 checkAdmin = ->
   throw new Meteor.Error(403, "Not logged in as admin") unless Meteor.user()?.admin

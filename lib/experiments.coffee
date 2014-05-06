@@ -19,14 +19,17 @@ class TurkServer.Experiment
       startTime: Date.now()
       batchId: batch._id
       treatment: treatment.name
-      treatmentId: treatment._id
+
     return Experiments.insert(fields)
 
+  # TODO: what is this being used for?
   @getBatch: (groupId) ->
     experiment = Experiments.findOne(groupId)
     return Batches.findOne(experiment.batchId) if experiment?
 
-  @getTreatment: (groupId) -> Experiments.findOne(groupId)?.treatment
+  @getTreatment: (groupId) ->
+    treatmentName = Experiments.findOne(groupId)?.treatment
+    return Treatments.findOne(name: treatmentName)
 
   @setup: (groupId) ->
     context =

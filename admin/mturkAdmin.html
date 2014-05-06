@@ -24,6 +24,7 @@
             <th>HITTypeId</th>
         </tr>
         </thead>
+        <tbody>
         {{#each hitTypes}}
         <tr class="{{selectedClass}}">
             <td>{{Title}}</td>
@@ -36,6 +37,7 @@
             </td>
         </tr>
         {{/each}}
+        </tbody>
     </table>
     <button class="btn btn-primary -ts-new-hittype">New HIT Type</button>
 </template>
@@ -214,6 +216,7 @@
                     <th>Expiration</th>
                 </tr>
                 </thead>
+                <tbody>
                 {{#each hits}}
                 <tr>
                     <td>{{HITId}}</td>
@@ -222,6 +225,7 @@
                     <td>{{_tsRenderISOTime Expiration}}</td>
                 </tr>
                 {{/each}}
+                </tbody>
             </table>
         </div>
         <div class="col-md-6 well">
@@ -329,11 +333,13 @@
             <th>Exit Data</th>
         </tr>
         </thead>
+        <tbody>
         {{#each completedAssts}}
         <tr>
-            <td>{{> tsUserPill _tsLookupWorker}}</td>
+            <td>{{> tsUserPill workerId=workerId }}</td>
             <td>{{> tsDescList exitdata}}</td>
         </tr>
         {{/each}}
+        </tbody>
     </table>
 </template>
