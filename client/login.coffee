@@ -100,6 +100,9 @@ if params.hitId and params.assignmentId and params.workerId
 # Recover either page params or stored session params as above
 loginParams = Session.get("_loginParams")
 
+# Unconditionally set batch ID, so batches work even in HIT preview.
+Session.set '_batchId', params.batchId
+
 if loginParams
   Meteor._debug "Logging in with captured or stored parameters"
   mturkLogin(loginParams)

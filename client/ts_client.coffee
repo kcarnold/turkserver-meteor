@@ -25,7 +25,7 @@ TurkServer.isAdmin = ->
   )?.admin
 
 TurkServer.batch = ->
-  batchId = Session.get('_loginParams')?.batchId
+  batchId = Session.get('_batchId')
   Batches.findOne(batchId) if batchId?
 
 TurkServer.treatment = -> Treatments.findOne()
