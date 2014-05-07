@@ -107,6 +107,7 @@ if loginParams
   Meteor._debug "Logging in with captured or stored parameters"
   mturkLogin(loginParams)
 else
+  console.log "I think this happens in HIT preview as well as testing, and shouldn't."
   # Give enough time to load before showing login dialog
   Meteor.setTimeout testLogin, 1000 # TODO this is just a hack to ensure that Batch data appears
 
