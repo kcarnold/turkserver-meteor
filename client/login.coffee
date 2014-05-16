@@ -56,6 +56,7 @@ Template.tsTestingLogin.events =
     }
 
     Session.set("_loginParams", loginParams)
+    Session.set '_batchId', batchId
     mturkLogin(loginParams)
 
     loginDialog?.modal('hide')
