@@ -96,3 +96,6 @@ TurkServer.ensureTreatmentExists = (props) ->
     treatment._id
   else
     Treatments.insert props
+
+TurkServer.ensureBatchExists = (props) ->
+  Batches.upsert {name: props.name}, props
