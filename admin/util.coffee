@@ -1,26 +1,54 @@
-@Util = {}
+TurkServer.Util ?= {}
 
-Util.duration = (millis) ->
+TurkServer.Util.duration = (millis) ->
   diff = moment.utc(millis)
   time = diff.format("H:mm:ss")
   days = +diff.format("DDD") - 1
   return (if days isnt 0 then days + "d " else "") + time
 
-Util.timeSince = (timestamp) -> Util.duration(TimeSync.serverTime() - timestamp)
-Util.timeUntil = (timestamp) -> Util.duration(timestamp - TimeSync.serverTime())
+TurkServer.Util.timeSince = (timestamp) ->
+  TurkServer.Util.duration(TimeSync.serverTime() - timestamp)
+TurkServer.Util.timeUntil = (timestamp) ->
+  TurkServer.Util.duration(timestamp - TimeSync.serverTime())
 
-UI.registerHelper "_tsLookupTreatment", ->
-  treatmentId = "" + (@_id || @)
-  return Treatments.findOne(treatmentId) || treatmentId
+UI.registerHelper "_tsViewingBatch", -> Batches.findOne(Session.get("_tsViewingBatchId"))
+
+UI.registerHelper "_tsLookupTreatment", -> Treatments.findOne(name: ""+@)
 
 UI.registerHelper "_tsRenderTime", (timestamp) -> new Date(timestamp).toLocaleString()
+UI.registerHelper "_tsRenderTimeMillis", (timestamp) ->
+  m = moment(timestamp)
+  m.format("L h:mm:ss.SSS A")
 
-UI.registerHelper "_tsRenderTimeSince", Util.timeSince
-UI.registerHelper "_tsRenderTimeUntil", Util.timeUntil
+UI.registerHelper "_tsRenderTimeSince", TurkServer.Util.timeSince
+UI.registerHelper "_tsRenderTimeUntil", TurkServer.Util.timeUntil
 
 UI.registerHelper "_tsRenderISOTime", (isoString) ->
   m = moment(isoString)
-  return m.format("l LT") + " (" + m.fromNow() + ")"
+  return m.format("L LT") + " (" + m.fromNow() + ")"
+
+Template.tsBatchSelector.events =
+  "change select": (e) ->
+    unless Session.equals("_tsViewingBatchId", e.target.value)
+      Session.set("_tsViewingBatchId", e.target.value)
+
+Template.tsBatchSelector.batches = -> Batches.find()
+Template.tsBatchSelector.noBatchSelection = -> not Session.get("_tsViewingBatchId")
+Template.tsBatchSelector.selected = -> Session.equals("_tsViewingBatchId", @_id)
+
+Template.tsInstancePill.instance = -> Experiments.findOne(""+@)
+
+Template.tsInstancePill.rendered = ->
+  container = @$(".ts-instance-pill-container")
+  container.popover
+    html: true
+    placement: "auto right"
+    trigger: "hover"
+    container: container
+    content: ->
+      # FIXME: Workaround as popover doesn't update with changed data
+      # https://github.com/meteor/meteor/issues/2010#issuecomment-40532280
+      UI.toHTML Template.tsAdminGroupInfo.extend data: UI.getElementData(container[0])
 
 Template.tsUserPill.user = ->
   switch
@@ -49,7 +77,7 @@ Template.tsUserPill.rendered = ->
     placement: "auto right"
     trigger: "hover"
     container: container
-    content: =>
+    content: ->
       # FIXME: Workaround as popover doesn't update with changed data
       # https://github.com/meteor/meteor/issues/2010#issuecomment-40532280
       UI.toHTML Template.tsUserPillPopover.extend data: UI.getElementData(container[0])

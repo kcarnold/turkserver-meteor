@@ -1,7 +1,6 @@
-activeBatch = -> Batches.findOne(active: true)
 treatments = -> Treatments.find()
 
-Template.tsAdminExperiments.events =
+Template.tsAdminExperiments.events
   "click .-ts-watch-experiment": ->
     groupId = @_id
     currentRoute = Router.current()
@@ -22,9 +21,15 @@ Template.tsAdminExperiments.events =
     bootbox.confirm "This will end the experiment immediately. Are you sure?", (res) ->
       Meteor.call "ts-admin-stop-experiment", expId if res
 
-Template.tsAdminExperiments.activeBatch = activeBatch
-
 numUsers = -> @users?.length
+
+Template.tsAdminExperimentMaintenance.events
+  "click .-ts-stop-all-experiments": (e) ->
+    bootbox.confirm "This will end all experiments in progress. Are you sure?", (res) ->
+      return unless res
+      Meteor.call "ts-admin-stop-all-experiments", Session.get("_tsViewingBatchId"), (err, res) ->
+        bootbox.alert(err) if err?
+        bootbox.alert(res + " instances stopped") if res?
 
 Template.tsAdminActiveExperiments.experiments = ->
   Experiments.find
@@ -40,7 +45,8 @@ Template.tsAdminCompletedExperiments.experiments = ->
   ,
     sort: { startTime: 1 }
 
-Template.tsAdminCompletedExperiments.duration = -> Util.duration(@endTime - @startTime)
+Template.tsAdminCompletedExperiments.duration = ->
+  TurkServer.Util.duration(@endTime - @startTime)
 
 Template.tsAdminCompletedExperiments.numUsers = numUsers
 
@@ -76,19 +82,14 @@ Template.tsAdminNewTreatment.events =
 Template.tsAdminTreatmentConfig.selectedTreatment = ->
   Treatments.findOne Session.get("_tsSelectedTreatmentId")
 
-Template.tsAdminActiveBatches.events =
-  "click .-ts-retire-batch": ->
+Template.tsAdminConfigureBatch.events =
+  "click .-ts-activate-batch": ->
+    Batches.update @_id, $set:
+      active: true
+
+  "click .-ts-deactivate-batch": ->
     Batches.update @_id, $set:
       active: false
-
-Template.tsAdminActiveBatches.activeBatch = activeBatch
-
-Template.tsAdminConfigureBatch.events =
-  "click .-ts-activate-batch": (e) ->
-    unless @treatmentIds?.length > 0
-      bootbox.alert "Select at least one treatment to activate this batch."
-      return
-    Meteor.call "ts-admin-activate-batch", @_id
 
 Template.tsAdminConfigureBatch.selectedBatch = ->
   Batches.findOne(Session.get("_tsSelectedBatchId"))
@@ -109,41 +110,18 @@ Template.tsAdminBatchEditDesc.rendered = ->
 
 Template.tsAdminBatchEditTreatments.events =
   "click .-ts-remove-batch-treatment": (e, tmpl) ->
-    treatmentId = "" + (@_id || @) # In case the treatment is gone
+    treatmentName = "" + (@name || @) # In case the treatment is gone
     Batches.update Session.get("_tsSelectedBatchId"),
-      $pull: { treatmentIds:  treatmentId }
+      $pull: { treatments:  treatmentName }
 
   "click .-ts-add-batch-treatment": (e, tmpl) ->
     e.preventDefault()
     treatment = UI.getElementData(tmpl.find(":selected"))
-    return unless treatment._id
+    return unless treatment?
     Batches.update @_id,
-      $addToSet: { treatmentIds: treatment._id }
+      $addToSet: { treatments: treatment.name }
 
-Template.tsAdminBatchEditTreatments.treatments = treatments
-Template.tsAdminBatchEditTreatments.treatmentName = ->
-  Treatments.findOne(""+@)?.name
-
-Template.tsAdminBatchEditGrouping.events =
-  "change select": (e, tmpl) ->
-    selected = tmpl.find(":selected").value
-    Batches.update @_id,
-      $set: grouping: selected
-  "change input[name=groupVal]": (e) ->
-    value = parseInt e.target.value
-    return unless value
-    Batches.update @_id,
-      $set: groupVal: value
-  "change input[name=lobby]": (e) ->
-    Batches.update @_id,
-      $set: lobby: e.target.checked
-
-Template.tsAdminBatchEditGrouping.fixedGroupSize = -> @grouping is "groupSize"
-Template.tsAdminBatchEditGrouping.fixedGroupCount = -> @grouping is "groupCount"
-Template.tsAdminBatchEditGrouping.lobbyEnabled = -> if @lobby then "with lobby" else "no lobby"
-
-Template.tsAdminConfigureBatch.activatable = ->
-  not @active and not Batches.findOne(active: true)
+Template.tsAdminBatchEditTreatments.allTreatments = treatments
 
 Template.tsAdminBatchList.events =
   "click tbody > tr": (e) ->

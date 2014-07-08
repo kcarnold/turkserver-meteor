@@ -1,9 +1,35 @@
+<template name="tsBatchSelector">
+    <label>Filter Batch:</label>
+    <select class="form-control">
+        <option disabled selected={{noBatchSelection}}></option>
+        {{#each batches}}
+        <option value="{{_id}}" selected={{selected}}>{{name}}</option>
+        {{/each}}
+    </select>
+</template>
+
+<template name="tsBatchMessage">
+    {{#with _tsViewingBatch}}
+    <div class="alert alert-info">
+        {{> UI.contentBlock this}}
+    </div>
+    {{else}}
+    <div class="alert alert-warning">
+        No batch selected. Choose one above.
+    </div>
+    {{/with}}
+</template>
+
 <template name="tsAdminGroupInfo">
     <dl class="dl-horizontal ts-compact">
         <dt>Group:</dt>
         <dd>{{_id}}</dd>
-        <dt>Treatment:</dt>
-        <dd><span class="badge badge-inverse">{{treatment}}</span></dd>
+        <dt>Treatments:</dt>
+        <dd>
+            {{#each treatments}}
+            <span class="badge badge-inverse">{{this}}</span>
+            {{/each}}
+        </dd>
         <dt>Users:</dt>
         <dd>
             {{#each users}}
@@ -11,6 +37,17 @@
             {{/each}}
         </dd>
     </dl>
+</template>
+
+<template name="tsInstancePill">
+    {{#with instance}}
+    <div class="ts-instance-pill-container">
+        <span class="label label-primary">
+            <span class="glyphicon glyphicon-tasks"></span>
+            {{users.length}}
+        </span>
+    </div>
+    {{/with}}
 </template>
 
 <template name="tsUserPill">

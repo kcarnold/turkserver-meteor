@@ -44,6 +44,8 @@
 
 <template name="tsAdminViewHitType">
     <dl class="dl-horizontal ts-compact">
+        <dt><i>Batch</i></dt>
+        <dd>{{batchName}}</dd>
         <dt>Title</dt>
         <dd>{{Title}}</dd>
         <dt>Description</dt>
@@ -310,7 +312,7 @@
 <template name="tsAdminWorkers">
     {{> tsAdminPanel}}
 
-    {{> tsAdminAssignments}}
+    {{> tsAdminEmail}}
 </template>
 
 <template name="tsAdminPanel">
@@ -323,20 +325,108 @@
     </svg>
 </template>
 
-<template name="tsAdminAssignments">
-    <h3>Completed Assignments</h3>
+<template name="tsAdminEmail">
+    <h3>E-mail workers</h3>
 
+    <div class="row">
+        <div class="col-md-6 well">
+            <form>
+                <div class="form-group">
+                    <label>Subject:</label>
+                    <input class="form-control" name="subject" type="text" required>
+                </div>
+                <div class="form-group">
+                    <label>Message:</label>
+                    <textarea class="form-control" name="message" required></textarea>
+                </div>
+                <div class="radio">
+                    <label>
+                        <input type="radio" name="selection" value="all" checked>All Panel Workers
+                    </label>
+                </div>
+                <div class="radio">
+                    <label>
+                        <input type="radio" name="selection" value="qual">Workers with qualification:
+                    </label>
+                    <input class="form-control" style="width: 200px; display: inline-block" type="text" name="qualification">
+                </div>
+                <button class="btn btn-primary" type="submit">Notify Workers</button>
+            </form>
+        </div>
+    </div>
+</template>
+
+<template name="tsAdminAssignments">
+    {{#tsBatchMessage}}
+        Viewing assignments created in batch <b>{{name}}</b>.
+    {{/tsBatchMessage}}
+
+    {{> tsAdminAssignmentMaintenance }}
+
+    {{> tsAdminActiveAssignments}}
+    {{> tsAdminCompletedAssignments}}
+</template>
+
+<template name="tsAdminAssignmentMaintenance">
+    <div class="row">
+        <div class="well span12">
+            <h3>Maintenance</h3>
+            <button class="btn btn-danger -ts-cancel-assignments">Cancel Disconnected Assignments</button>
+        </div>
+    </div>
+</template>
+
+<template name="tsAdminActiveAssignments">
+    <h3>Active Assignments</h3>
     <table class="table table-condensed table-striped ts-admin-table">
         <thead>
         <tr>
             <th style="width: 100px">Worker ID</th>
+            <th style="width: 90px">Experiment Instances</th>
+            <th style="width: 90px">IP Address</th>
+            <th style="width: 170px">Acceptance Time</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{#each activeAssts}}
+        <tr>
+            <td>{{> tsUserPill workerId=workerId }}</td>
+            <td>
+                {{#each instances}}
+                {{> tsInstancePill id}}
+                {{/each}}
+            </td>
+            <td>{{ipAddr}}</td>
+            <td>{{_tsRenderTime acceptTime}}</td>
+        </tr>
+        {{/each}}
+        </tbody>
+    </table>
+</template>
+
+<template name="tsAdminCompletedAssignments">
+    <h3>Completed Assignments</h3>
+    <table class="table table-condensed table-striped ts-admin-table">
+        <thead>
+        <tr>
+            <th style="width: 100px">Worker ID</th>
+            <th style="width: 90px">Experiment Instances</th>
+            <th style="width: 90px">IP Address</th>
+            <th style="width: 170px">Completion Time</th>
             <th>Exit Data</th>
         </tr>
         </thead>
         <tbody>
         {{#each completedAssts}}
         <tr>
-            <td>{{> tsUserPill workerId=workerId }}<br>{{_tsRenderISOTime submitTime}}<br>{{tsTreatmentNameForExperiment experimentId}}</td>
+            <td>{{> tsUserPill workerId=workerId }}</td>
+            <td>
+                {{#each instances}}
+                {{> tsInstancePill id}}
+                {{/each}}
+            </td>
+            <td>{{ipAddr}}</td>
+            <td>{{_tsRenderTime submitTime}}</td>
             <td>{{> tsDescList exitdata}}</td>
         </tr>
         {{/each}}

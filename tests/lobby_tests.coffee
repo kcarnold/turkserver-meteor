@@ -1,56 +1,108 @@
 if Meteor.isServer
-  Meteor.methods
-    setupLobby: -> Batches.update {active: true},
-      $set:
-        lobby: true
-        grouping: "groupSize"
-        groupVal: 3
-    joinLobby: ->
-      TurkServer.Lobby.addUser Meteor.userId()
-    getLobby: ->
-      LobbyStatus.find().fetch()
-    leaveLobby: ->
-      TurkServer.Lobby.removeUser Meteor.userId()
-    teardownLobby: -> Batches.update {active: true},
-      $unset:
-        lobby: null
-        grouping: null
-        groupVal: null
+  # Create a batch to test the lobby on
+  batchId = "lobbyBatchTest"
+  Batches.upsert batchId, $set: {}
 
-if Meteor.isClient
-  Tinytest.addAsync "lobby - set up", (test, next) ->
-    Meteor.call "setupLobby", next
+  lobby = TurkServer.Batch.getBatch(batchId).lobby
 
-  Tinytest.addAsync "lobby - verify config", (test, next) ->
-    Deps.autorun (c) ->
-      groupSize = TSConfig.findOne("lobbyThreshold")
-      return unless groupSize?
+  userId = "lobbyUser"
 
-      c.stop()
-      test.isTrue groupSize
-      test.equal groupSize.value, 3
-      next()
+  Meteor.users.upsert userId,
+    $set: {
+      workerId: "lobbyTestWorker"
+    }
+
+  Assignments.upsert {
+    batchId
+    hitId: "lobbyTestHIT"
+    assignmentId: "lobbyTestAsst"
+  }, $set:
+    workerId: "lobbyTestWorker"
+    status: "assigned"
+
+  asst = TurkServer.Assignment.getCurrentUserAssignment(userId)
+
+  joinedUserId = null
+  changedUserId = null
+  leftUserId = null
+
+  lobby.events.on "user-join", (asst) -> joinedUserId = asst.userId
+  lobby.events.on "user-status", (asst) -> changedUserId = asst.userId
+  lobby.events.on "user-leave", (asst) -> leftUserId = asst.userId
+
+  withCleanup = TestUtils.getCleanupWrapper
+    before: ->
+      lobby.pluckUsers [userId]
+      joinedUserId = null
+      changedUserId = null
+      leftUserId = null
+    after: -> # Can't use this for async
 
   # Basic tests just to make sure joining/leaving works as intended
-  Tinytest.addAsync "lobby - user join", (test, next) ->
-    Meteor.call "joinLobby", (err, res) ->
-      test.isFalse err
+  Tinytest.addAsync "lobby - add user", withCleanup (test, next) ->
+    lobby.addAssignment(asst)
+
+    Meteor.defer ->
+      test.equal joinedUserId, userId
+
+      lobbyAssts = lobby.getAssignments()
+      test.length lobbyAssts, 1
+      test.equal lobbyAssts[0], asst
+      test.equal lobbyAssts[0].userId, userId
+
+      lobbyData = LobbyStatus.findOne(userId)
+      test.equal lobbyData.batchId, batchId
+      test.equal lobbyData.asstId, asst.asstId
+
       next()
 
-  Tinytest.addAsync "lobby - check contents", (test, next) ->
-    Meteor.call "getLobby", (err, res) ->
-      test.isFalse err
-      test.length res, 1
-      test.equal res[0]._id, Meteor.userId()
-      test.equal res[0].status, false
+  # TODO update this test for generalized lobby user state
+  Tinytest.addAsync "lobby - change state", withCleanup (test, next) ->
+    lobby.addAssignment(asst)
+    lobby.toggleStatus(asst)
+
+    lobbyUsers = lobby.getAssignments()
+    test.length lobbyUsers, 1
+    test.equal lobbyUsers[0], asst
+    test.equal lobbyUsers[0].userId, userId
+    # test.equal lobbyUsers[0].status, true
+
+    Meteor.defer ->
+      test.equal changedUserId, userId
       next()
 
-  Tinytest.addAsync "lobby - user leave", (test, next) ->
-    Meteor.call "leaveLobby", (err, res) ->
-      test.isFalse err
+  Tinytest.addAsync "lobby - remove user", withCleanup (test, next) ->
+    lobby.addAssignment(asst)
+    lobby.removeAssignment(asst)
+
+    lobbyUsers = lobby.getAssignments()
+    test.length lobbyUsers, 0
+
+    Meteor.defer ->
+      test.equal leftUserId, userId
       next()
 
-  Tinytest.addAsync "lobby - tear down", (test, next) ->
-    Meteor.call "teardownLobby", (err, res) ->
-      test.isFalse err
+  Tinytest.addAsync "lobby - remove nonexistent user", withCleanup (test, next) ->
+    # TODO create an assignment with some other state here
+    lobby.removeAssignment("rando")
+
+    Meteor.defer ->
+      test.equal leftUserId, null
       next()
+
+if Meteor.isClient
+  # TODO fix config test for lobby along with assigner lobby state
+  undefined
+#  Tinytest.addAsync "lobby - verify config", (test, next) ->
+#    groupSize = null
+#
+#    verify = ->
+#      test.isTrue groupSize
+#      test.equal groupSize.value, 3
+#      next()
+#
+#    fail = ->
+#      test.fail()
+#      next()
+#
+#    simplePoll (-> (groupSize = TSConfig.findOne("lobbyThreshold"))? ), verify, fail, 2000

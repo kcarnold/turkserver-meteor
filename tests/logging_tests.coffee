@@ -6,11 +6,15 @@ if Meteor.isServer
   Meteor.methods
     # Clear anything in logs for the given group
     clearLogs: ->
-      Logs.remove
-        _groupId: Partitioner.group()
+      throw new Meteor.Error(403, "no group assigned") unless (group = Partitioner.group())?
+      Logs.remove # Should be same as {}, but more explicit
+        _groupId: group
       return
     getLogs: (selector) ->
-      return Logs.find(selector || {}).fetch()
+      throw new Meteor.Error(403, "no group assigned") unless (group = Partitioner.group())?
+      selector = _.extend (selector || {}),
+        _groupId: group
+      return Logs.find(selector).fetch()
 
   Tinytest.add "logging - server group binding", (test) ->
     Partitioner.bindGroup testGroup, ->
@@ -25,8 +29,7 @@ if Meteor.isServer
     test.isTrue doc._timestamp
 
   Tinytest.add "logging - override timestamp", (test) ->
-    now = new Date()
-    past = new Date(now.getTime() - 1000)
+    past = new Date(Date.now() - 1000)
 
     Partitioner.bindGroup testGroup, ->
       Meteor.call "clearLogs"
@@ -39,6 +42,7 @@ if Meteor.isServer
     test.equal doc._timestamp, past
 
 # Client methods
+# These run after the experiment client tests, so they should be logged in
 if Meteor.isClient
   Tinytest.addAsync "logging - initialize test", (test, next) ->
     Meteor.call "clearLogs", (err, res) ->

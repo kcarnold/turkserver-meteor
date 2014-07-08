@@ -1,45 +1,311 @@
-getUserGroup = (userId) ->
+###
+  An assignment captures the lifecycle of a user assigned to a HIT.
+  In the future, it can be generalized to represent the entire connection
+  of a user from whatever source
+###
+class TurkServer.Assignment
+  # Map of all assignments by id
+  _assignments = {}
+
+  @createAssignment: (data) ->
+    asstId = Assignments.insert(data)
+    return _assignments[asstId] = new Assignment(asstId, data)
+
+  @getAssignment: (asstId) ->
+    if (asst = _assignments[asstId])?
+      return asst
+    else
+      data = Assignments.findOne(asstId)
+      throw new Error("Assignment doesn't exist") unless data?
+      return _assignments[asstId] = new Assignment(asstId, data)
+
+  @getCurrentUserAssignment: (userId) ->
+    user = Meteor.users.findOne(userId)
+    return unless user.workerId?
+    asstRecord = Assignments.findOne
+      workerId: user.workerId
+      status: "assigned"
+    return @getAssignment(asstRecord._id) if asstRecord?
+
+  @currentAssignment: ->
+    userId = Meteor.userId()
+    return unless userId?
+    return TurkServer.Assignment.getCurrentUserAssignment(userId)
+
+  constructor: (@asstId, properties) ->
+    check(@asstId, String)
+    throw new Error("Assignment already exists; use getAssignment") if _assignments[@asstId]?
+    # The below properties are invariant for any assignment
+    { @batchId, @hitId, @assignmentId, @workerId } = properties || Assignments.findOne(@asstId)
+    check(@batchId, String)
+    check(@hitId, String)
+    check(@assignmentId, String)
+    check(@workerId, String)
+    # Grab the userId
+    @userId = Meteor.users.findOne(workerId: @workerId)._id
+
+  getBatch: -> TurkServer.Batch.getBatch(@batchId)
+
+  getInstances: -> Assignments.findOne(@asstId).instances || []
+
+  showExitSurvey: ->
+    Meteor.users.update @userId,
+      $set: { "turkserver.state": "exitsurvey" }
+
+  isCompleted: -> Assignments.findOne(@asstId).status is "completed"
+
+  setCompleted: (doc) ->
+    user = Meteor.users.findOne(@userId)
+    # check that the user is allowed to do this
+    throw new Meteor.Error(403, ErrMsg.stateErr) unless user?.turkserver?.state is "exitsurvey"
+
+    Assignments.update @asstId,
+      $set: {
+        status: "completed"
+        submitTime: new Date()
+        exitdata: doc
+      }
+
+    Meteor.users.update @userId,
+      $unset: {"turkserver.state": null}
+
+  # Mark this assignment as returned and not completable
+  setReturned: ->
+    Assignments.update @asstId,
+      $set: { status: "returned" }
+    # Unset the user's state
+    Meteor.users.update {workerId: @workerId},
+      $unset: {"turkserver.state": null}
+
+  # Gets the variable payment amount for this assignment (bonus)
+  getPayment: ->
+    Assignments.findOne(@asstId).bonusPayment
+
+  # Sets the payment amount for this assignment, replacing any existing value
+  setPayment: (amount) ->
+    check(amount, Number)
+    Assignments.update @asstId,
+      $set:
+        bonusPayment: amount
+
+  # Adds (or subtracts) an amount to the payment for this assignment
+  addPayment: (amount) ->
+    check(amount, Number)
+    Assignments.update @asstId,
+      $inc: bonusPayment: amount
+
+  # Pays the worker their bonus, if set, using the mturk API
+  payBonus: (message) ->
+    check(message, String)
+
+    data = Assignments.findOne(@asstId)
+    throw new Error("Bonus value not set") unless data.bonusPayment?
+    throw new Error("Bonus already paid") if data.bonusPaid?
+
+    TurkServer.mturk "GrantBonus",
+      WorkerId: data.workerId
+      AssignmentId: data.assignmentId
+      BonusAmount:
+        Amount: data.bonusPayment
+        CurrencyCode: "USD"
+      Reason: message
+
+    # Successfully paid!
+    Assignments.update @asstId,
+      $set:
+        bonusPaid: new Date()
+        bonusMessage: message
+
+  # Gets an arbitrary data field on this assignment
+  getData: (field) ->
+    data = Assignments.findOne(@asstId)
+    return if field then data[field] else data
+
+  # Sets an arbitrary data field on this assignment
+  setData: (doc) ->
+    Assignments.update @asstId, $set: doc
+
+  # Get data from the worker associated with this assignment
+  getWorkerData: (field) ->
+    data = Workers.findOne(@workerId)
+    return if field then data[field] else data
+
+  # Sets data on the worker associated with this assignment
+  setWorkerData: (doc) ->
+    Workers.upsert @workerId, { $set: doc }
+
+  # Handle an initial connection by this user after accepting a HIT
+  _loggedIn: ->
+    # Is worker in part of an active group (experiment)?
+    # This is okay even if batch is not active
+    if Partitioner.getUserGroup(@userId)
+      Meteor._debug @userId + " is reconnecting to an existing group"
+      return
+
+    # Is the worker reconnecting to an exit survey?
+    if Meteor.users.findOne(@userId)?.turkserver?.state is "exitsurvey"
+      Meteor._debug @userId + " is reconnecting to the exit survey"
+      # Wait for them to fill it out
+      return
+
+    # Nothing else needs to be done; a fresh login OR a reconnect will check for lobby state properly.
+
+  _enterLobby: ->
+    batch = @getBatch()
+    throw new Meteor.Error(403, "No batch associated with assignment") unless batch?
+    batch.lobby.addAssignment(@)
+
+  _removeFromLobby: ->
+    # Remove from lobby if present
+    @getBatch().lobby.removeAssignment(@)
+
+  _joinInstance: (instanceId) ->
+    Assignments.update @asstId,
+      $push:
+        instances: {
+          id: instanceId
+          joinTime: new Date()
+        }
+
+  # Helper functions for constructing database updates
+  addResetDisconnectedUpdateFields = (obj, discDurationMillis) ->
+    obj.$inc ?= {}
+    obj.$unset ?= {}
+    obj.$inc["instances.$.disconnectedTime"] = discDurationMillis
+    obj.$unset["instances.$.lastDisconnect"] = null
+    return obj
+
+  addResetIdleUpdateFields = (obj, idleDurationMillis) ->
+    obj.$inc ?= {}
+    obj.$unset ?= {}
+    obj.$inc["instances.$.idleTime"] = idleDurationMillis
+    obj.$unset["instances.$.lastIdle"] = null
+    return obj
+
+  _leaveInstance: (instanceId) ->
+    now = new Date
+    updateObj =
+      $set:
+        "instances.$.leaveTime": now
+
+    # If in disconnected state, compute total disconnected time
+    if (discTime = @_getLastDisconnect(instanceId))?
+      addResetDisconnectedUpdateFields(updateObj, now.getTime() - discTime)
+    # If in idle state, compute total idle time
+    if (idleTime = @_getLastIdle(instanceId))?
+      addResetIdleUpdateFields(updateObj, now.getTime() - idleTime)
+
+    Assignments.update {
+      _id: @asstId
+      "instances.id": instanceId
+    }, updateObj
+
+  # Handle a disconnection by this user
+  _disconnected: (instanceId) ->
+    check(instanceId, String)
+
+    # Record a disconnect time if we are currently part of an instance
+    now = new Date()
+    updateObj =
+      $set:
+        "instances.$.lastDisconnect": now
+
+    # If we are idle, add the total idle time to the running amount;
+    # A new idle session will start when the user reconnects
+    if (idleTime = @_getLastIdle(instanceId))?
+      addResetIdleUpdateFields(updateObj, now.getTime() - idleTime)
+
+    Assignments.update {
+      _id: @asstId
+      "instances.id": instanceId
+    }, updateObj
+
+  # Handle a reconnection by a user, if they were assigned prior to the reconnection
+  _reconnected: (instanceId) ->
+    # XXX Safety hatch: never count an idle time tracked over a disconnection
+    updateObj =
+      $unset:
+        "instances.$.lastIdle": null
+
+    if (discTime = @_getLastDisconnect(instanceId))?
+      addResetDisconnectedUpdateFields(updateObj, Date.now() - discTime)
+
+    Assignments.update {
+      _id: @asstId
+      "instances.id": instanceId
+    }, updateObj
+
+  _isIdle: (instanceId, timestamp) ->
+    # TODO: ignore if user is disconnected
+    Assignments.update {
+      _id: @asstId
+      "instances.id": instanceId
+    }, $set:
+      "instances.$.lastIdle": timestamp
+
+  _isActive: (instanceId, timestamp) ->
+    idleTime = @_getLastIdle(instanceId)
+    return unless idleTime
+    Assignments.update {
+      _id: @asstId
+      "instances.id": instanceId
+    }, addResetIdleUpdateFields({}, timestamp - idleTime)
+    return
+
+  # Helper functions
+  # TODO test that these are grabbing the right numbers
+  _getLastDisconnect: (instanceId) ->
+    _.find(@getInstances(), (inst) -> inst.id is instanceId)?.lastDisconnect
+
+  _getLastIdle: (instanceId) ->
+    _.find(@getInstances(), (inst) -> inst.id is instanceId)?.lastIdle
+
+getActiveGroup = (userId) ->
   return unless userId
   # No side effects from admin, please
   return if Meteor.users.findOne(userId)?.admin
   return Partitioner.getUserGroup(userId)
 
 ###
+  TODO: If/when simultaneous connections are supported, fix logic below
+  or just replace connections with users due to muxing implemented in user-status
+###
+
+attemptCallbacks = (callbacks, context, errMsg) ->
+  for cb in callbacks
+    try
+      cb.call(context)
+    catch e
+      Meteor._debug errMsg, e
+
+###
   Connect callbacks
 ###
 
-UserStatus.events.on "connectionLogin", (doc) ->
-  # Update ip address in assignments for this worker
-  user = Meteor.users.findOne(doc.userId)
-  return if user?.admin
-
-  # TODO verify this is valid as we reject multiple connections on login
-  Assignments.update {
-    workerId: user.workerId
-    status: "assigned"
-  }, {
-    $set: {ipAddr: doc.ipAddr}
-  }
-
-  return
-
 connectCallbacks = []
 
-UserStatus.events.on "connectionLogin", (doc) ->
-  return unless (groupId = getUserGroup(doc.userId))?
-  treatment = TurkServer.Experiment.getTreatment(groupId)
-  Partitioner.bindGroup groupId, ->
+userReconnect = (doc) ->
+  # Ensure user is in a valid state; add to lobby if not
+  user = Meteor.users.findOne(doc.userId)
+  return if not user? or user?.admin
+
+  state = user?.turkserver?.state
+  if state is "lobby" or not state?
+    TurkServer.Assignment.getCurrentUserAssignment(doc.userId)._enterLobby()
+    return
+
+  return unless (groupId = getActiveGroup(doc.userId))?
+  asst = TurkServer.Assignment.getCurrentUserAssignment(doc.userId)
+  asst._reconnected(groupId)
+
+  TurkServer.Instance.getInstance(groupId).bindOperation ->
     TurkServer.log
       _userId: doc.userId
       _meta: "connected"
 
-    _.each connectCallbacks, (cb) ->
-      try
-        cb.call
-          userId: doc.userId
-          treatment: treatment
-      catch e
-        Meteor._debug "Exception in user connect callback: " + e
+    attemptCallbacks(connectCallbacks, this, "Exception in user connect callback")
+    return
+  , { userId: doc.userId }
 
 TurkServer.onConnect = (func) ->
   connectCallbacks.push func
@@ -48,27 +314,26 @@ TurkServer.onConnect = (func) ->
   Disconnect callbacks
 ###
 
-UserStatus.events.on "connectionLogout", (doc) ->
-  # Remove disconnected users from lobby, if they are there
-  TurkServer.Lobby.removeUser(doc.userId)
-
 disconnectCallbacks = []
 
-UserStatus.events.on "connectionLogout", (doc) ->
-  return unless (groupId = getUserGroup(doc.userId))?
-  treatment = TurkServer.Experiment.getTreatment(groupId)
-  Partitioner.bindGroup groupId, ->
+userDisconnect = (doc) ->
+  user = Meteor.users.findOne(doc.userId)
+  return if not user? or user?.admin
+
+  asst = TurkServer.Assignment.getCurrentUserAssignment(doc.userId)
+  asst?._removeFromLobby()
+
+  return unless (groupId = getActiveGroup(doc.userId))?
+  asst?._disconnected(groupId) # Needed during tests, as assignments are being removed from db
+
+  TurkServer.Instance.getInstance(groupId).bindOperation ->
     TurkServer.log
       _userId: doc.userId
       _meta: "disconnected"
 
-    _.each disconnectCallbacks, (cb) ->
-      try
-        cb.call
-          userId: doc.userId
-          treatment: treatment
-      catch e
-        Meteor._debug "Exception in user disconnect callback: " + e
+    attemptCallbacks(disconnectCallbacks, this, "Exception in user disconnect callback")
+    return
+  , { userId: doc.userId }
 
 TurkServer.onDisconnect = (func) ->
   disconnectCallbacks.push func
@@ -83,59 +348,53 @@ activeCallbacks = []
 TurkServer.onIdle = (func) -> idleCallbacks.push(func)
 TurkServer.onActive = (func) -> idleCallbacks.push(func)
 
-# TODO: compute total amount of time a user has been idle in a group
+userIdle = (doc) ->
+  return unless (groupId = getActiveGroup(doc.userId))?
 
-UserStatus.events.on "connectionIdle", (doc) ->
-  return unless (groupId = getUserGroup(doc.userId))?
-  treatment = TurkServer.Experiment.getTreatment(groupId)
-  Partitioner.bindGroup groupId, ->
+  asst = TurkServer.Assignment.getCurrentUserAssignment(doc.userId)
+  asst._isIdle(groupId, doc.lastActivity)
+
+  TurkServer.Instance.getInstance(groupId).bindOperation ->
     TurkServer.log
       _userId: doc.userId
       _meta: "idle"
       _timestamp: doc.lastActivity # Overridden to a past value
 
-    _.each idleCallbacks, (cb) ->
-      try
-        cb.call
-          userId: doc.userId
-          treatment: treatment
-      catch e
-        Meteor._debug "Exception in user idle callback: " + e
+    attemptCallbacks(idleCallbacks, this, "Exception in user idle callback")
+    return
+  , { userId: doc.userId }
 
-UserStatus.events.on "connectionActive", (doc) ->
-  return unless (groupId = getUserGroup(doc.userId))?
-  treatment = TurkServer.Experiment.getTreatment(groupId)
-  Partitioner.bindGroup groupId, ->
+userActive = (doc) ->
+  return unless (groupId = getActiveGroup(doc.userId))?
+
+  asst = TurkServer.Assignment.getCurrentUserAssignment(doc.userId)
+  asst._isActive(groupId, doc.lastActivity)
+
+  TurkServer.Instance.getInstance(groupId).bindOperation ->
     TurkServer.log
       _userId: doc.userId
       _meta: "active"
       _timestamp: doc.lastActivity # Also overridden
 
-    _.each activeCallbacks, (cb) ->
-      try
-        cb.call
-          userId: doc.userId
-          treatment: treatment
-      catch e
-        Meteor._debug "Exception in user active callback: " + e
+    attemptCallbacks(activeCallbacks, this, "Exception in user active callback")
+    return
+  , { userId: doc.userId }
+
+UserStatus.events.on "connectionLogin", userReconnect
+UserStatus.events.on "connectionLogout", userDisconnect
+UserStatus.events.on "connectionIdle", userIdle
+UserStatus.events.on "connectionActive", userActive
+
+TestUtils.connCallbacks = {
+  userReconnect
+  userDisconnect
+  userIdle
+  userActive
+}
 
 ###
   Methods
 ###
-
-getCurrentAssignment = (userId) ->
-  userId = Meteor.userId() unless userId?
-  return unless userId?
-  user = Meteor.users.findOne(userId)
-  Assignments.findOne
-    workerId: user.workerId
-    status: "assigned"
-
-getCurrentBatch = (userId)->
-  assignment = getCurrentAssignment(userId)
-  return unless assignment?
-  Batches.findOne(assignment.batchId)
-
 
 Meteor.methods
   "ts-set-username": (username) ->
@@ -147,117 +406,22 @@ Meteor.methods
     Meteor.users.update userId,
       $set: {username: username}
 
-  "ts-record-inactive": (data) ->
-    # TODO implement tracking inactivity
-    # We don't trust client timestamps, but only as identifier and use difference
-    console.log data.start, data.time
-
   "ts-submit-exitdata": (doc, panel) ->
     userId = Meteor.userId()
     throw new Meteor.Error(403, ErrMsg.authErr) unless userId
-    user = Meteor.users.findOne(userId)
-
-    # check that the user is allowed to do this
-    throw new Meteor.Error(403, ErrMsg.stateErr) unless user?.turkserver?.state is "exitsurvey"
 
     # TODO what if this doesn't exist?
-    asst = getCurrentAssignment()
-
+    asst = TurkServer.Assignment.currentAssignment()
     # mark assignment as completed and save the data
-    Assignments.update asst._id,
-      $set: {
-        status: "completed"
-        submitTime: Date.now()
-        exitdata: doc
-      }
+    asst.setCompleted(doc)
 
     # TODO schedule this worker's resume token to be scavenged in the future
 
     # Update worker contact info
-    # TODO generalize this
-    if panel
-      Workers.upsert user.workerId,
-        $set:
-          contact: panel.contact
-          times: panel.times
-
-    Meteor.users.update userId,
-      $unset: {"turkserver.state": null}
+    # TODO don't overwrite panel data if we don't need to.
+    asst.setWorkerData(panel) if panel?
 
     # return true to auto submit the HIT
     return true
-
-TurkServer.handleConnection = (doc) ->
-
-  # TODO Does the worker need to take quiz/tutorial?
-
-  # Is worker in part of an active group (experiment)?
-  # This is okay even if no active batch
-  if Partitioner.getUserGroup(doc.userId)
-    Meteor._debug doc.userId + " is reconnecting to an existing group"
-    # other reconnection info recorded above
-    return
-
-  # Is the worker reconnecting to an exit survey?
-  if Meteor.users.findOne(doc.userId)?.turkserver?.state is "exitsurvey"
-    Meteor._debug doc.userId + " is reconnecting to the exit survey"
-    # Wait for them to fill it out
-    return
-
-  # None of the above, throw them into the assignment mechanism
-  batch = getCurrentBatch(doc.userId)
-  throw new Meteor.Error(403, "No batch associated with assignment") unless batch?
-
-  if batch.grouping is "groupSize" and batch.lobby
-    TurkServer.Lobby.addUser(doc.userId)
-  else if batch.grouping is "groupCount"
-    TurkServer.assignUserRoundRobin(doc.userId)
-  else
-    TurkServer.assignUserSequential(doc.userId)
-
-# TODO fix up the stuff below to assign treatments properly
-
-# Assignment from lobby
-TurkServer.assignAllUsers = (userIds) ->
-  # TODO don't just assign a random treatment
-  batch = getCurrentBatch(userIds[0])
-  treatmentId = _.sample batch.treatmentIds
-  treatment = Treatments.findOne(treatmentId)
-  newId = TurkServer.Experiment.create(batch, treatment)
-  TurkServer.Experiment.setup(newId)
-
-  _.each userIds, (userId) ->
-    TurkServer.Experiment.addUser(newId, userId)
-
-# Assignment for fixed group count
-TurkServer.assignUserRoundRobin = (userId) ->
-  experimentIds = getCurrentBatch(userId).experimentIds
-  exp = _.min Experiments.find(_id: $in: experimentIds).fetch(), (ex) ->
-    Grouping.find(groupId: ex._id).count()
-
-  TurkServer.Experiment.addUser(exp._id, userId)
-
-# Assignment for no lobby fixed group size
-TurkServer.assignUserSequential = (userId) ->
-  batch = getCurrentBatch(userId)
-
-  assignedToExisting = false
-  Experiments.find(assignable: true).forEach (exp) ->
-    return if assignedToExisting # Break loop if already assigned
-    if Grouping.find(groupId: exp._id).count() < batch.groupVal
-      TurkServer.Experiment.addUser(exp._id, userId)
-      assignedToExisting = true
-
-  return if assignedToExisting
-
-  # Create a new experiment
-  # TODO find a treatment
-  treatmentId = _.sample batch.treatmentIds
-  treatment = Treatments.findOne(treatmentId)
-  newId = TurkServer.Experiment.create batch, treatment,
-    assignable: true
-  TurkServer.Experiment.setup(newId)
-  TurkServer.Experiment.addUser(newId, userId)
-
 
 

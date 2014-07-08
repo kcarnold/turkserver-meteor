@@ -57,7 +57,8 @@ Package.on_use(function (api) {
 
     // Shared files
     api.add_files([
-        'lib/common.coffee'
+        'lib/common.coffee',
+        'lib/util.coffee'
     ]);
 
     // Server files
@@ -65,13 +66,14 @@ Package.on_use(function (api) {
         'lib/config.coffee',
         'lib/turkserver.coffee',
         'lib/mturk.coffee',
+        'lib/lobby_server.coffee',
+        'lib/batches.coffee',
         'lib/experiments.coffee',
         'lib/logging.coffee',
         'lib/assigners.coffee',
         'lib/connections.coffee',
         'lib/timers.coffee',
-        'lib/accounts_mturk.coffee',
-        'lib/lobby_server.coffee'
+        'lib/accounts_mturk.coffee'
     ], 'server');
 
     // Client
@@ -129,15 +131,23 @@ Package.on_test(function (api) {
     api.use('session', 'client');
 
     api.use('turkserver');
+    api.use('timesync');
 
     api.add_files("tests/display_fix.css");
-    api.add_files("tests/insecure_login.js");
 
-    api.add_files('tests/utils.coffee');
+    api.add_files('tests/utils.coffee'); // Deletes users so do it before insecure login
+    api.add_files("tests/insecure_login.js");
 
     api.add_files('tests/lobby_tests.coffee');
     api.add_files('tests/auth_tests.coffee', 'server');
-    api.add_files('tests/experiment_tests.coffee');
+    api.add_files('tests/connection_tests.coffee', 'server');
+    api.add_files('tests/experiment_tests.coffee', 'server');
+    api.add_files('tests/experiment_client_tests.coffee');
     api.add_files('tests/timer_tests.coffee', 'server');
     api.add_files('tests/logging_tests.coffee');
+    // This goes after experiment tests, so we can be sure that assigning works
+    api.add_files('tests/assigner_tests.coffee', 'server');
+
+    // This runs after user is logged in, as it requires a userId
+    api.add_files('tests/helper_tests.coffee');
 });

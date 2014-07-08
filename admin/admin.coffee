@@ -10,12 +10,10 @@ Meteor.publish "tsAdmin", ->
   # Publish all admin data
   return [
     Batches.find(),
-    Assignments.find(),
     Workers.find(),
     Qualifications.find(),
     HITTypes.find(),
     HITs.find(),
-    LobbyStatus.find()
   ]
 
 userFindOptions =
@@ -25,16 +23,24 @@ userFindOptions =
     username: 1
     workerId: 1
 
-# Admin users - needs to update if group updates
-# Return all experiments unless in a group
-Meteor.publish "tsAdminState", (groupId) ->
+# Batch-specific filters for assignments, experiment instances, and lobby
+Meteor.publish "tsAdminState", (batchId, groupId) ->
   return [] unless isAdmin(@userId)
 
+  # When in a group, override whatever user publication the group sends with our fields
+  # TODO Don't publish all users
   cursors = [ Meteor.users.find({}, userFindOptions) ]
+  # Send nothing else, specific experiment/treatment sent in tsCurrentExperiment
+  return cursors if groupId?
 
-  unless groupId # specific experiment/treatment sent in tsCurrentExperiment
-    cursors.push Experiments.find()
-    cursors.push Treatments.find()
+  # Return nothing if no batch is selected
+  batchSelector = if batchId then {batchId} else undefined
+
+  # TODO only publish assigned/completed assignments
+  cursors.push Assignments.find(batchSelector)
+  cursors.push LobbyStatus.find(batchSelector)
+  cursors.push Experiments.find(batchSelector)
+  cursors.push Treatments.find()
 
   return cursors
 
@@ -74,39 +80,16 @@ Meteor.publish "tsGroupLogs", (groupId, limit) ->
       limit: limit
     })
 
-checkAdmin = ->
-  throw new Meteor.Error(403, "Not logged in as admin") unless Meteor.user()?.admin
-
 Meteor.methods
-  "ts-admin-activate-batch": (batchId) ->
-    checkAdmin()
-
-    batch = Batches.findOne(batchId)
-    if batch.grouping is "groupCount"
-      # Make sure we have enough experiments in this batch
-      numExps = batch?.experimentIds?.length || 0
-      while numExps++ < batch.groupVal
-        # TODO pick treatments properly
-        treatmentId = _.sample batch.treatmentIds
-        treatment = Treatments.findOne(treatmentId).name
-        expId = TurkServer.Experiment.create(batch, treatment)
-        TurkServer.Experiment.setup(expId)
-        Batches.update batchId,
-          $addToSet: experimentIds: expId
-
-    Batches.update batchId, $set:
-      active: true
-    return
-
   "ts-admin-account-balance": ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     try
       return TurkServer.mturk "GetAccountBalance", {}
     catch e
       throw new Meteor.Error(403, e.toString())
 
   "ts-admin-register-hittype": (hitTypeId) ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     # Build up the params to register the HIT Type
     params = HITTypes.findOne(hitTypeId)
     delete params._id
@@ -138,7 +121,7 @@ Meteor.methods
     return
 
   "ts-admin-create-hit": (hitTypeId, params) ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     hitType = HITTypes.findOne(hitTypeId)
     throw new Meteor.Error(403, "HITType not registered") unless hitType.HITTypeId
 
@@ -163,7 +146,7 @@ Meteor.methods
     return
 
   "ts-admin-refresh-hit": (HITId) ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     throw new Meteor.Error(400, "HIT ID not specified") unless HITId
     try
       hitData = TurkServer.mturk "GetHIT", HITId: HITId
@@ -174,7 +157,7 @@ Meteor.methods
     return
 
   "ts-admin-expire-hit": (HITId) ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     throw new Meteor.Error(400, "HIT ID not specified") unless HITId
     try
       hitData = TurkServer.mturk "ForceExpireHIT", HITId: HITId
@@ -187,7 +170,7 @@ Meteor.methods
     return
 
   "ts-admin-change-hittype": (params) ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     check(params.HITId, String)
     check(params.HITTypeId, String)
     try
@@ -200,7 +183,7 @@ Meteor.methods
     return
 
   "ts-admin-extend-hit": (params) ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     throw new Meteor.Error(400, "HIT ID not specified") unless params.HITId
     try
       TurkServer.mturk "ExtendHIT", params
@@ -213,19 +196,89 @@ Meteor.methods
     return
 
   "ts-admin-join-group": (groupId) ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     Partitioner.setUserGroup Meteor.userId(), groupId
     return
 
   "ts-admin-leave-group": ->
-    checkAdmin()
+    TurkServer.checkAdmin()
     Partitioner.clearUserGroup Meteor.userId()
     return
 
-  "ts-admin-stop-experiment": (groupId) ->
-    checkAdmin()
-    TurkServer.Experiment.complete(groupId)
+  "ts-admin-lobby-event": (batchId, event) ->
+    TurkServer.checkAdmin()
+    batch = TurkServer.Batch.getBatch(batchId)
+    throw new Meteor.Error(500, "Batch #{batchId} does not exist") unless batch?
+    emitter = batch.lobby.events
+    emitter.emit.apply(emitter, Array::slice.call(arguments, 1)) # Event and any other arguments
     return
+
+  "ts-admin-notify-workers": (subject, message, selector) ->
+    TurkServer.checkAdmin()
+    check(subject, String)
+    check(message, String)
+
+    workers = Workers.find(selector).map((w) -> w._id)
+    return 0 unless workers.length > 0
+    count = 0
+
+    while workers.length > 0
+      # Notify workers 50 at a time
+      chunk = workers.splice(0, 50)
+
+      params =
+        Subject: subject
+        MessageText: message
+        WorkerId: chunk
+
+      try
+        TurkServer.mturk "NotifyWorkers", params
+      catch e
+        throw new Meteor.Error(500, e.toString())
+
+      count += chunk.length
+      Meteor._debug(count + " workers notified")
+
+    return count
+
+  "ts-admin-cleanup-user-state": ->
+    # Find all users that are state: experiment but don't have an active assignment
+    # This shouldn't have to be used in most cases
+    Meteor.users.find({"turkserver.state": "experiment"}).map (user) ->
+      return if TurkServer.Assignment.getCurrentUserAssignment(user._id)?
+      Meteor.users.update user._id,
+        $unset: "turkserver.state": null
+
+    return
+
+  "ts-admin-cancel-assignments": (batchId) ->
+    TurkServer.checkAdmin()
+    check(batchId, String)
+
+    count = 0
+    Assignments.find({batchId, status: "assigned"}).map (asst) ->
+      return if Meteor.users.find({workerId: asst.workerId}).status?.online
+      TurkServer.Assignment.getAssignment(asst._id).setReturned()
+      count++
+    return count
+
+  "ts-admin-stop-experiment": (groupId) ->
+    TurkServer.checkAdmin()
+    check(groupId, String)
+
+    TurkServer.Instance.getInstance(groupId).teardown()
+    return
+
+  "ts-admin-stop-all-experiments": (batchId) ->
+    TurkServer.checkAdmin()
+    check(batchId, String)
+
+    count = 0
+    Experiments.find({batchId, endTime: {$exists: false} }).map (instance) ->
+      TurkServer.Instance.getInstance(instance._id).teardown()
+      count++
+
+    return count
 
 # Create and set up admin user (and password) if not existent
 Meteor.startup ->

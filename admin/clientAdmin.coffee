@@ -18,7 +18,7 @@ class TSAdminController extends RouteController
       pause()
   layout: "tsAdminLayout"
   action: ->
-    # TODO remove this when EventedMind/iron-router#607 is merged
+    # TODO remove this when EventedMind/iron-router#607 is merged, next release after 0.7.1
     @setLayout("tsAdminLayout")
     @render()
 
@@ -32,6 +32,9 @@ Router.map ->
   @route "turkserver/workers",
     controller: TSAdminController
     template: "tsAdminWorkers"
+  @route "turkserver/assignments",
+    controller: TSAdminController
+    template: "tsAdminAssignments"
   @route "turkserver/connections",
     controller: TSAdminController
     template: "tsAdminConnections"
@@ -63,7 +66,7 @@ Deps.autorun ->
 Deps.autorun ->
   return unless Meteor.user()?.admin
   # must pass in different args to actually effect it
-  Meteor.subscribe("tsAdminState", Partitioner.group())
+  Meteor.subscribe("tsAdminState", Session.get("_tsViewingBatchId"), Partitioner.group())
 
 # Extra admin user subscription for after experiment ended
 Deps.autorun ->
@@ -109,3 +112,8 @@ Template.tsAdminConnections.users = ->
   Meteor.users.find
     admin: {$exists: false}
     "turkserver.state": {$exists: true}
+
+Template.tsAdminConnectionMaintenance.events
+  "click .-ts-cleanup-user-state": ->
+    Meteor.call "ts-admin-cleanup-user-state", (err, res) ->
+      bootbox.alert(err.reason) if err?

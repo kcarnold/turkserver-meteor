@@ -1,75 +1,99 @@
 init_queue = []
 
+# TODO the collection called "Experiments" actually now refers to instances
+
 # The experiment-specific version of Meteor.startup
 TurkServer.initialize = (handler) ->
   init_queue.push(handler)
 
-TurkServer.batch = -> TurkServer.Experiment.getBatch Partitioner.group()
-TurkServer.treatment = -> TurkServer.Experiment.getTreatment Partitioner.group()
+# Represents a group or slice on the server, containing some users
+class TurkServer.Instance
+  # map of groupId to instance objects
+  _instances = {}
 
-TurkServer.finishExperiment = ->
-  group = Partitioner.group()
-  return unless group
-  TurkServer.Experiment.complete(group)
+  @getInstance: (groupId) ->
+    if (instance = _instances[groupId])?
+      return instance
+    else
+      throw new Error("Instance does not exist: " + groupId) unless Experiments.findOne(groupId)?
+      # TODO somehow the above call can block and an instance is created when it returns
+      return _instances[groupId] ?= new TurkServer.Instance(groupId)
 
-# TODO make this into a class like Meteor.collection ?
-class TurkServer.Experiment
-  @create: (batch, treatment, fields) ->
-    fields = _.extend fields || {},
-      startTime: Date.now()
-      batchId: batch._id
-      treatment: treatment.name
+  @currentInstance: ->
+    @getInstance Partitioner.group()
 
-    return Experiments.insert(fields)
+  constructor: (@groupId) ->
+    throw new Error("Instance already exists; use getInstance") if _instances[@groupId]
 
-  # TODO: what is this being used for?
-  @getBatch: (groupId) ->
-    experiment = Experiments.findOne(groupId)
-    return Batches.findOne(experiment.batchId) if experiment?
+  # Run a function scoped to this instance with a given context.
+  # The value of context.instance will be set to this instance.
+  bindOperation: (func, context) ->
+    context ?= {}
+    context.instance = this
+    Partitioner.bindGroup @groupId, -> func.call(context)
 
-  @getTreatment: (groupId) ->
-    treatmentName = Experiments.findOne(groupId)?.treatment
-    return Treatments.findOne(name: treatmentName)
-
-  @setup: (groupId) ->
-    context =
-      group: groupId
-      treatment: @getTreatment(groupId)
-
-    Partitioner.bindGroup groupId, ->
-      (handler.call(context) for handler in init_queue)
+  # Run the initialize handlers for this instance
+  setup: ->
+    @bindOperation ->
+      TurkServer.log
+        _meta: "initialized"
+        treatmentData: @instance.treatment()
+      (handler.call(@) for handler in init_queue)
       return
 
-  # Add user to experiment
-  @addUser: (groupId, userId) ->
-    Partitioner.setUserGroup(userId, groupId)
+  addAssignment: (asst) ->
+    check(asst, TurkServer.Assignment)
+    if Experiments.findOne({_id: @groupId, endTime: $exists: true})?
+      throw new Error("Cannot add a user to an instance that has ended.")
+      return
 
-    Experiments.update { _id: groupId },
-      { $addToSet: { users: userId } }
-    Meteor.users.update userId,
+    # Add a user to this instance
+    Partitioner.setUserGroup(asst.userId, @groupId)
+
+    Experiments.update @groupId,
+      { $addToSet: { users: asst.userId } }
+    Meteor.users.update asst.userId,
       $set: { "turkserver.state": "experiment" }
 
-    # Record experimentId in Assignment collection
-    workerId = Meteor.users.findOne(userId).workerId
-    Assignments.update {workerId: workerId, status: "assigned"},
-      $set: {experimentId: groupId}
+    # Record instance Id in Assignment
+    asst._joinInstance(@groupId)
+    return
 
-  # Take all users out of group and send to exit survey
-  @complete: (groupId) ->
-    users = Experiments.findOne(groupId).users
+  users: -> Experiments.findOne(@groupId).users || []
 
-    Experiments.update groupId,
+  batch: ->
+    instance = Experiments.findOne(@groupId)
+    return TurkServer.Batch.getBatch(instance.batchId) if instance?
+
+  treatment: ->
+    instance = Experiments.findOne(@groupId)
+    return unless instance?
+    return TurkServer._mergeTreatments Treatments.find({name: $in: instance.treatments})
+
+  # Close this instance and return people to the lobby
+  teardown: ->
+    now = new Date()
+
+    Partitioner.bindGroup @groupId, ->
+      TurkServer.log
+        _meta: "teardown"
+        _timestamp: now
+
+    Experiments.update @groupId,
       $set:
-        endTime: Date.now()
-        assignable: false
+        endTime: now
 
-    _.each users, (userId) ->
+    return unless (users = Experiments.findOne(@groupId).users)?
+    batch = @batch()
+
+    for userId in users
       Partitioner.clearUserGroup(userId)
-      Meteor.users.update userId,
-        $set: { "turkserver.state": "exitsurvey" }
+      asst = TurkServer.Assignment.getCurrentUserAssignment(userId)
+      continue unless asst?
+      # If the user is still assigned, do final accounting and put them in lobby
+      asst._leaveInstance(@groupId)
+      batch.lobby.addAssignment asst
 
-    Meteor.flush()
-
-
+    return
 
 

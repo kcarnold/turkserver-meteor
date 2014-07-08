@@ -35,11 +35,17 @@
   left: 0
   right: 0
 
-.ts-user-pill-container
+.ts-user-pill-container, .ts-instance-pill-container
   display: inline-block
 
 dl.ts-compact, dl.dl-horizontal.ts-compact
   margin: 0
+
+dl.dl-horizontal.ts-compact dt
+  width: 92px
+
+dl.dl-horizontal.ts-compact dd
+  margin-left: 100px
 
 table.ts-admin-table
   // border-collapse: collapse
@@ -47,3 +53,10 @@ table.ts-admin-table
   // The below two directives force a wrap
   table-layout: fixed
   word-wrap: break-word
+
+// Graphing classes
+.bar
+  fill: steelblue
+
+.bar:hover
+  fill: brown

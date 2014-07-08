@@ -62,6 +62,9 @@
                     <a href="/turkserver/connections">Connections</a>
                 </li>
                 <li>
+                    <a href="/turkserver/assignments">Assignments</a>
+                </li>
+                <li>
                     <a href="/turkserver/lobby">Lobby</a>
                 </li>
                 <li>
@@ -71,6 +74,10 @@
                     <a href="/turkserver/manage">Manage</a>
                 </li>
             </ul>
+
+            <form class="navbar-form navbar-right">
+                {{> tsBatchSelector}}
+            </form>
 
             <ul class="nav navbar-right">
                 <li class="navbar-text">
@@ -95,7 +102,7 @@
     <h3>TurkServer Overview</h3>
     <div class="row">
         <div class="col-md-6">
-            <dl class="well dl-horizontal ts-compact">
+            <dl class="well dl-horizontal">
                 <dt>Connected Users:</dt>
                 <dd>{{onlineUserCount}}</dd>
                 <dt>Users in Lobby:</dt>
@@ -134,5 +141,16 @@
         {{/each}}
         </tbody>
     </table>
+
+    {{> tsAdminConnectionMaintenance}}
+</template>
+
+<template name="tsAdminConnectionMaintenance">
+    <div class="row">
+        <div class="well span12">
+            <h3>Maintenance</h3>
+            <button class="btn btn-danger -ts-cleanup-user-state">Cleanup User State</button>
+        </div>
+    </div>
 </template>
 

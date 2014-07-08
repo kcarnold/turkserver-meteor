@@ -20,15 +20,16 @@ UI.registerHelper "hitParams", params
 UI.registerHelper "hitIsViewing",
   params.assignmentId and params.assignmentId is "ASSIGNMENT_ID_NOT_AVAILABLE"
 
-loginCallback = (e) ->
-  return unless e?
-  if e.message is ErrMsg.alreadyCompleted
+loginCallback = (err) ->
+  return unless err
+  console.log err
+  if err.reason is ErrMsg.alreadyCompleted
     # submit the HIT
     TurkServer.submitHIT()
   else
     bootbox.dialog
       closeButton: false
-      message: "<p>Unable to login:</p>" + e.message
+      message: "<p>Unable to login:</p>" + err.message
 
     # TODO: make this a bit more robust
     # Log us out even if the resume token logged us in; copied from
@@ -95,6 +96,8 @@ if params.hitId and params.assignmentId and params.workerId
     assignmentId: params.assignmentId
     workerId: params.workerId
     batchId: params.batchId
+    # TODO: hack to allow testing logins
+    test: params.workerId.indexOf("_Worker") >= 0
   })
   Meteor._debug "Captured login params"
 
@@ -105,6 +108,7 @@ loginParams = Session.get("_loginParams")
 Session.set '_batchId', params.batchId
 
 if loginParams
+
   Meteor._debug "Logging in with captured or stored parameters"
   mturkLogin(loginParams)
 else

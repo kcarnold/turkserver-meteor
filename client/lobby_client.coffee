@@ -1,9 +1,8 @@
-@LobbyStatus = new Meteor.Collection("ts.lobby")
 
 # Paths for lobby
 Router.map ->
   @route "lobby",
-    template: "tsLobby",
+    template: "tsBasicLobby",
     layoutTemplate: "tsContainer"
     onBeforeAction: (pause) ->
       # Don't show lobby to unauthenticated users
@@ -12,12 +11,16 @@ Router.map ->
         @render("tsUserAccessDenied")
         pause()
 
-# Subscribe to lobby if we are in it (auto unsubscribe if we aren't)
-Deps.autorun ->
-  return if Package?.tinytest # Don't change routes when being tested
-  if TurkServer.inLobby()
-    Meteor.subscribe("lobby")
-    Router.go("/lobby")
+# We need to defer this because of IR crap, as usual
+Meteor.startup ->
+  Meteor.defer ->
+    # Subscribe to lobby if we are in it (auto unsubscribe if we aren't)
+    Deps.autorun ->
+      return if Package?.tinytest # Don't change routes when being tested
+      if TurkServer.inLobby()
+        # TODO this needs to subscribe by batch
+        Meteor.subscribe("lobby", TurkServer.batch()?._id)
+        Router.go("/lobby")
 
 Meteor.methods
   "toggleStatus" : ->
@@ -27,6 +30,12 @@ Meteor.methods
 
     LobbyStatus.update userId,
       $set: { status: not existing.status }
+
+Template.tsBasicLobby.count = -> LobbyStatus.find().count()
+
+Template.tsBasicLobby.lobbyInfo = -> LobbyStatus.find()
+
+Template.tsBasicLobby.identifier = -> Meteor.users.findOne(@_id)?.username || "<i>unnamed user</i>"
 
 Template.tsLobby.lobbyInfo = -> LobbyStatus.find()
 

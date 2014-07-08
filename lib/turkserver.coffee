@@ -37,7 +37,7 @@ RoundTimers.deny(always)
   HITs
 ###
 
-Workers.deny(always)
+Workers.allow(adminOnly)
 Assignments.deny(always)
 
 Qualifications.allow(adminOnly)
@@ -66,36 +66,142 @@ Assignments._ensureIndex
   batchId: 1
   acceptTime: 1
 
+###
+  Data publications
+###
+
 # Publish turkserver user fields to a user
 Meteor.publish null, ->
-  return unless @userId
+  return null unless @userId
 
   return Meteor.users.find @userId,
     fields: { turkserver: 1 }
 
 # Publish current experiment for a user, if it exists
+# This includes the data sent to the admin user
 Meteor.publish "tsCurrentExperiment", (group) ->
   return unless @userId
-  return [
+  cursors = [
     Experiments.find(group),
-    Treatments.find(name: Experiments.findOne(group)?.treatment) # Current treatment data
     RoundTimers.find() # Partitioned by group
   ]
 
+  # Current treatment data
+  # XXX Treatments will not be updated reactively if added/removed to the experiment
+  if (treatments = Experiments.findOne(group)?.treatments)?
+    cursors.push Treatments.find(name: $in: treatments)
+
+  # Current user assignment data, including idle and disconnection time
+  # This won't be sent for the admin user
+  # No reactive join needed here because workerId is immutable for users and re-sub will change group
+  if (workerId = Meteor.users.findOne(@userId)?.workerId)?
+    cursors.push Assignments.find({
+      workerId: workerId
+      "instances.id": group
+    }, {
+      fields: {
+        instances: 1
+      }
+    })
+
+  return cursors
+
 # For test logins, need to publish the list of batches.
-Meteor.publish null, -> Batches.find()
+# TODO make this a bit more secure
+Meteor.publish null, ->
+  return Batches.find() unless @userId?
+  # Publish specific batch if logged in
+
+  # This should work for now because an assignment is made upon login
+  return [] unless (workerId = Meteor.users.findOne(@userId)?.workerId)?
+
+  sub = this
+  handle = Assignments.find({workerId, status: "assigned"}).observeChanges
+    added: (id, fields) ->
+      batchId = Assignments.findOne(id).batchId
+      sub.added "ts.batches", batchId, Batches.findOne(batchId)
+    removed: (id) ->
+      batchId = Assignments.findOne(id).batchId
+      sub.removed "ts.batches", batchId
+
+  sub.ready()
+  sub.onStop -> handle.stop()
 
 TurkServer.startup = (func) ->
   Meteor.startup ->
     Partitioner.directOperation(func)
 
-TurkServer.ensureTreatmentExists = (props) ->
-  treatment = Treatments.findOne {name: props.name}
-  if treatment?
-    Treatments.update treatment._id, {$set: props}
-    treatment._id
-  else
-    Treatments.insert props
+# Backwards compatibility fixes
+# XXX Remove these in the future
+Meteor.startup ->
+  prefix = "Schema update: "
 
-TurkServer.ensureBatchExists = (props) ->
-  Batches.upsert {name: props.name}, props
+  # Move "treatment" field in experiment instances to "treatments" array
+  treatmentUpdates = 0
+  Experiments.find({treatment: $exists: true}).forEach (instance, idx) ->
+    treatmentUpdates = idx + 1
+    Experiments.update instance._id,
+      $addToSet: treatments: instance.treatment
+      $unset: treatment: null
+
+  console.log prefix + treatmentUpdates + " treatments updated" if treatmentUpdates > 0
+
+  # Move "experimentId" fields in assignments to "instances" array
+  experimentIdUpdates = 0
+  Assignments.find({experimentId: $exists: true}).forEach (asst, idx) ->
+    experimentIdUpdates = idx + 1
+    Assignments.update asst._id,
+      $push: instances: asst.experimentId
+      $unset: experimentId: null
+
+  console.log prefix + experimentIdUpdates + " experimentIds converted to instances" if experimentIdUpdates > 0
+
+  # Update string values in instances array to objects
+  instanceUpdates = 0
+  Assignments.find({instances: $type: 2}).forEach (asst, idx) ->
+    instanceUpdates = idx + 1
+    instanceIds = asst.instances
+    Assignments.update asst._id,
+      $set: instances: _.map(instanceIds, (id) -> {id})
+
+  console.log prefix + instanceUpdates + " instance ids updated to objects" if instanceUpdates > 0
+
+  hitTypeBatchUpdates = 0
+  HITTypes.find({batchId: $exists: false}).forEach (hitType, idx) ->
+    # Find an assignment that was created in this HIT Type, if any, to patch up the batch Id
+    return unless hitType.HITTypeId?
+    hits = _.pluck(HITs.find(HITTypeId: hitType.HITTypeId).fetch(), "HITId")
+    return unless hits.length > 0
+    asst = Assignments.findOne
+      batchId: $exists: true
+      hitId: $in: hits
+    return unless asst?
+    HITTypes.update hitType._id,
+      $set: batchId: asst.batchId
+    hitTypeBatchUpdates += 1
+
+  console.log prefix + hitTypeBatchUpdates + " HIT Types updated with batch Ids" if hitTypeBatchUpdates > 0
+
+  experimentBatchUpdates = 0
+  Experiments.find({batchId: $exists: false}).forEach (exp, idx) ->
+    experimentBatchUpdates = idx + 1
+    someAsst = Assignments.findOne
+      "instances.id": exp._id
+    Experiments.update exp._id,
+      $set: batchId: someAsst.batchId
+
+  console.log prefix + experimentBatchUpdates + " batchIds added to experiment instances" if experimentBatchUpdates > 0
+
+  # Convert batch treatmentIds to treatments (names)
+  batchTreatmentUpdates = 0
+  Batches.find(treatmentIds: $exists: true).forEach (batch, idx) ->
+    batchTreatmentUpdates = idx + 1
+    treatments = []
+    for treatmentId in batch.treatmentIds
+      treatmentName = Treatments.findOne(treatmentId)?.name
+      treatments.push(treatmentName) if treatmentName?
+    Batches.update batch._id,
+      $set: { treatments }
+      $unset: {treatmentIds: null}
+
+  console.log prefix + batchTreatmentUpdates + " batch treatment ids updated to names" if instanceUpdates > 0

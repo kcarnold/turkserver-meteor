@@ -15,7 +15,7 @@ Logs.before.insert (userId, doc) ->
 
   doc._userId = userId if userId
   doc._groupId = groupId
-  doc._timestamp = new Date() unless doc?._timestamp # Allow specification of custom timestamps
+  doc._timestamp ?= new Date() # Allow specification of custom timestamps
   return true
 
 TurkServer.log = (doc, callback) ->
@@ -23,7 +23,7 @@ TurkServer.log = (doc, callback) ->
 
 Meteor.methods
   "ts-log": (doc) ->
-    Meteor._debug("Warning; received log request for not logged in user") unless @userId
+    Meteor._debug("Warning; received log request for anonymous user: ", doc) unless Meteor.userId()
     Logs.insert(doc)
     return
 

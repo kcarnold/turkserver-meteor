@@ -14,21 +14,14 @@ TurkServer.inExperiment = ->
 TurkServer.inExitSurvey = ->
   Session.equals("turkserver.state", "exitsurvey")
 
-TurkServer.isAdmin = ->
-  userId = Meteor.userId()
-  return false unless userId
-  return Meteor.users.findOne(
-    _id: userId
-    "admin": { $exists: true }
-  , fields:
-    "admin" : 1
-  )?.admin
-
 TurkServer.batch = ->
-  batchId = Session.get('_batchId')
-  Batches.findOne(batchId) if batchId?
+  if (batchId = Session.get('_loginParams')?.batchId)?
+    return Batches.findOne(batchId)
+  else
+    return Batches.findOne()
 
-TurkServer.treatment = -> Treatments.findOne()
+# Merge all treatments into one document
+TurkServer.treatment = -> TurkServer._mergeTreatments Treatments.find({})
 
 # Find current round, whether running or in break
 # TODO this polls every second, which can be quite inefficient
@@ -44,18 +37,24 @@ currentRound = ->
 
 TurkServer.currentRound = UI.emboxValue(currentRound, EJSON.equals)
 
+# Called to start the monitor with given settings when in experiment
+# Similar to usage in user-status demo
 safeStartMonitor = (threshold, idleOnBlur) ->
-  Deps.autorun ->
-    # Don't try to start the monitor in case the state changed
-    @stop() unless TurkServer.inExperiment()
+  Deps.autorun (c) ->
     try
-      UserStatus.startMonitor {threshold, idleOnBlur}
-      @stop()
+      settings = {threshold, idleOnBlur}
+      UserStatus.startMonitor(settings)
+      c.stop()
+      console.log "Idle monitor started with ", settings
 
 idleComp = null
 
 TurkServer.enableIdleMonitor = (threshold, idleOnBlur) ->
-  throw new Error("Idle monitor already enabled") if idleComp?
+  if idleComp?
+    # If monitor is already started, stop it before trying new settings
+    idleComp.stop()
+    UserStatus.stopMonitor() if Deps.nonreactive -> UserStatus.isMonitoring()
+
   idleComp = Deps.autorun ->
     if TurkServer.inExperiment()
       safeStartMonitor(threshold, idleOnBlur)
@@ -82,4 +81,5 @@ Deps.autorun ->
 
 Deps.autorun ->
   Meteor.subscribe("tsCurrentExperiment", Partitioner.group())
+
 
