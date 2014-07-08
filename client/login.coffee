@@ -57,7 +57,6 @@ Template.tsTestingLogin.events =
     }
 
     Session.set("_loginParams", loginParams)
-    Session.set '_batchId', batchId
     mturkLogin(loginParams)
 
     loginDialog?.modal('hide')
@@ -104,15 +103,11 @@ if params.hitId and params.assignmentId and params.workerId
 # Recover either page params or stored session params as above
 loginParams = Session.get("_loginParams")
 
-# Unconditionally set batch ID, so batches work even in HIT preview.
-Session.set '_batchId', params.batchId
-
 if loginParams
 
   Meteor._debug "Logging in with captured or stored parameters"
   mturkLogin(loginParams)
 else
-  # I think this happens in HIT preview as well as testing, and shouldn't.
   # Give enough time to load before showing login dialog
   Meteor.setTimeout testLogin, 1000 # TODO this is just a hack to ensure that Batch data appears
 

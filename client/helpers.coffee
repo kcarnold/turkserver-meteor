@@ -31,3 +31,4 @@ TurkServer.submitExitSurvey = (results, panel) ->
     # TODO: log the user out here? Maybe doesn't matter because resume login will be disabled
 
 TurkServer.submitHIT = -> UI.insert UI.render(Template.mturkSubmit), document.body
+
